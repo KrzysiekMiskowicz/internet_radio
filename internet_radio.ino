@@ -8,8 +8,8 @@
 #include <BluetoothA2DPSource.h>
 
 // WiFi params
-const char* SSID = "Champion-WiFi";
-const char* PASSWORD = "dupadupa2";
+const char* SSID = "***";
+const char* PASSWORD = "***";
 
 class Station {
   private:
@@ -102,7 +102,7 @@ void setupWifi(void) {
 }
 
 void setupBluetooth(void) {
-  a2dp_source.start("WI-C310");
+  a2dp_source.start("***");
   a2dp_source.set_volume(100);
 }
 
