@@ -7,9 +7,17 @@
 #include <EEPROM.h>
 #include <BluetoothA2DPSource.h>
 
+#include "AudioTools.h"
+#include "AudioLibs/AudioA2DP.h"
+#include "MP3DecoderHelix.h"
+
+using namespace libhelix;
+
 // WiFi params
 const char* SSID = "***";
 const char* PASSWORD = "***";
+
+const char* BLUETOOTH_RECEIVER = "***";
 
 class Station {
   private:
@@ -66,6 +74,8 @@ uint8_t buffer[bufferSize];
 const char* SERVER_NAME = "esp32";
 
 WebServer server(80);
+
+MP3DecoderHelix mp3;
 BluetoothA2DPSource a2dp_source;
 
 const int MAX_TASKS = 10;
@@ -74,6 +84,9 @@ TaskHandle_t streamingTasks[MAX_TASKS];
 void setup(void) {
   Serial.begin(115200);
 
+// TODO
+  mp3.setDataCallback(mp3DecoderCallback);
+  
   setupWifi();
   setupBluetooth();
   setupServer(); 
@@ -102,8 +115,10 @@ void setupWifi(void) {
 }
 
 void setupBluetooth(void) {
-  a2dp_source.start("***");
-  a2dp_source.set_volume(100);
+  // a2dp_source.set_ssid_callback(validate_bluetooth_receiver);
+  // a2dp_source.set_auto_reconnect(true);
+  a2dp_source.start(BLUETOOTH_RECEIVER);
+  a2dp_source.set_volume(255);
 }
 
 void setupServer(void) {
@@ -135,6 +150,14 @@ void setupServer(void) {
 
   server.begin();
   Serial.println("HTTP server started");
+}
+
+bool validate_bluetooth_receiver(const char* ssid, esp_bd_addr_t address, int rssi){
+   if (!strcmp(ssid, BLUETOOTH_RECEIVER)) {
+     Serial.println("Bluetooth connected to " + String(BLUETOOTH_RECEIVER));
+   }
+
+   return !strcmp(ssid, BLUETOOTH_RECEIVER) == 0;
 }
 
 void removeStationsFromEEPROM() {
@@ -314,26 +337,23 @@ void streamingTaskFunction(void* parameter) {
     server.send(200, "text/plain", "Streaming ...");
 
     bool do_close_stream = false;
+    
+    mp3.begin();
 
     while (!do_close_stream && client.connected()) {
       while (!do_close_stream && client.available()) {
         unsigned int bytesRead = client.readBytes(buffer, bufferSize);
         if (bytesRead > 0) {
+
           // Serial.println("Array: " + String(bytesRead));
           // printByteArray(buffer, bytesRead);
 
-          SoundData *data = new OneChannel8BitSoundData((int8_t*)buffer, bytesRead);
-          if (data != nullptr) {
-            Serial.println("Play: ");
-            a2dp_source.write_data(data);
-            vTaskDelay(pdMS_TO_TICKS(500));
-            delete data;
-          }
+          Serial.println("Fetch data");
+          mp3.write((int16_t*)buffer, bytesRead);
         }
         xSemaphoreTake(streamingSemaphore, portMAX_DELAY);
         do_close_stream = !do_continue_streaming;
         xSemaphoreGive(streamingSemaphore);
-        vTaskDelay(pdMS_TO_TICKS(5));
       }
     } 
   } else {
@@ -348,10 +368,36 @@ void streamingTaskFunction(void* parameter) {
 
 void printByteArray(uint8_t* array, size_t length) {
   for (size_t i = 0; i < length; i++) {
+    Serial.print("0x");
     Serial.print(array[i], HEX);
-    Serial.print(" "); 
+    Serial.print(", "); 
   }
   Serial.println();
 }
 
+void mp3DecoderCallback(MP3FrameInfo &info, int16_t *pcm_buffer, size_t len, void* ref) {
+  Serial.println("Callback");
+  SoundData *data = new OneChannelSoundData(pcm_buffer, len);
+  if (data != nullptr) {
+    a2dp_source.write_data(data);    
+    vTaskDelay(pdMS_TO_TICKS(300));
+    delete data;
+  }
+}
 
+// int32_t get_data_channels(Frame *frame, int32_t channel_len) {
+//     static double m_time = 0.0;
+//     double m_amplitude = 10000.0;  // -32,768 to 32,767
+//     double m_deltaTime = 1.0 / 44100.0;
+//     double m_phase = 0.0;
+//     double double_Pi = PI * 2.0;
+//     // fill the channel data
+//     for (int sample = 0; sample < channel_len; ++sample) {
+//         double angle = double_Pi * c3_frequency * m_time + m_phase;
+//         frame[sample].channel1 = m_amplitude * sin(angle);
+//         frame[sample].channel2 = frame[sample].channel1;
+//         m_time += m_deltaTime;
+//     }
+
+//     return channel_len;
+// }
