@@ -211,7 +211,7 @@ void handleRoot() {
   xSemaphoreGive(streamingSemaphore);
 
   Serial.println("root");
-  server.send(200, "text/plain", "Welcome into esp32 Internet Radio!");
+  server.send(200, "text/html", "Welcome to esp32 internet radio <button><a href=\"http://esp32.local/stations\">Start</a></button>");
 }
 
 void handleNotFound() {
@@ -232,7 +232,15 @@ void handleNotFound() {
   }
   server.send(404, "text/plain", message);
 }
-
+String lstripHttp(const String& url) {
+    String result = url;
+    if (result.startsWith("http://")) {
+        result = result.substring(7);
+    } else if (result.startsWith("https://")) {
+        result = result.substring(8);
+    }
+    return result;
+}
 void handleAddStation() {  
   xSemaphoreTake(streamingSemaphore, portMAX_DELAY); 
   do_continue_streaming = false;
@@ -246,20 +254,22 @@ void handleAddStation() {
   StaticJsonDocument<200> jsonBuffer;
   DeserializationError error = deserializeJson(jsonBuffer, server.arg("plain"));
   
-  if (error) {
-    server.send(400, "text/plain", "Invalid JSON data");
-    return;
-  }
+  String name = server.arg("name");
+  String serverName = lstripHttp(server.arg("url"));
+  String urlParams = "";
+
+  Serial.println(name);
+  Serial.println(serverName);
   
   // Extract the parameters from the JSON object
-  String name = jsonBuffer["name"];
-  String server_name = jsonBuffer["server"];
-  String url_params = jsonBuffer["url-params"];
-  Station station(name, server_name, url_params);
-
+  // String name = jsonBuffer["name"];
+  // String server_name = jsonBuffer["server"];
+  // String url_params = jsonBuffer["urlurlParams-params"];
+  // Station station(name, server_name, url_params);
+Station station(name, serverName, urlParams);
   updateStations(station);
   
-  server.send(200, "text/plain", "Station added successfully");
+  server.send(200, "text/html", "Station added successfully <a href=\"http://esp32.local/stations\">Back</a>");
 }
 
 void handleGetStations() {  
@@ -267,12 +277,23 @@ void handleGetStations() {
   do_continue_streaming = false;
   xSemaphoreGive(streamingSemaphore);
 
-  String message = "List of available stations:\n";
+  String message = "<h1>List of available stations:</h1>\n";
   for (int stations_ctr = 0; stations_ctr < stations_nr; stations_ctr++) {
     Station station = stations[stations_ctr];
-    message += String(stations_ctr + 1) + ": " + station.getName() + " [" + station.getServer() + "]\n";
+    message += "<a href=\"http://esp32.local/stations/"+String(stations_ctr + 1)+"\">" +String(stations_ctr + 1) + ": " + station.getName() + " [" + station.getServer() + "]</a>\n<button><a href=\"http://esp32.local/stream/"+String(stations_ctr + 1) + "\">Stream</a></button><br>";
   }
-  server.send(200, "text/plain", message);
+  message += R"(
+  <form action="stations" method="post">
+    <label for="name">Name:</label>
+    <input type="text" id="name" name="name" required>
+    <br><br>
+    <label for="url">URL:</label>
+    <input type="url" id="url" name="url" required>
+    <br><br>
+    <input type="submit" value="Submit">
+  </form>
+  )";
+  server.send(200, "text/html", message);
 }
 
 void handleGetStation() {  
@@ -285,7 +306,7 @@ void handleGetStation() {
     handleNotFound();
   } else {
     Station station = stations[station_nr - 1];
-    server.send(200, "text/plain", "Name: " + station.getName() + "\nUrl: " +  station.getUrl());
+    server.send(200, "text/html", "<a href=\"http://esp32.local/stations\">Back</a><p>Name: " + station.getName() + "</p>\n<p>Url: " +  station.getUrl() + "</p>");
   }
 }
 
@@ -299,7 +320,7 @@ void handleStreamStation() {
     handleNotFound();
     return;
   }
-
+  
   if (streamingTasks[station_nr - 1] == NULL) {
     char taskName[20];
     snprintf(taskName, sizeof(taskName), "Streaming Audio %d", station_nr);
@@ -311,10 +332,13 @@ void handleStreamStation() {
       taskName,                        // Task name
       10000,                           // Stack size (bytes)
       station_idx,                     // Task parameter (station object pointer)
-      1,                               // Task priority
+      tskIDLE_PRIORITY,                               // Task priority
       &streamingTasks[station_nr - 1], // Task handle
       0                                // Core to run the task on (0 or 1)
     );
+    
+    Station station = stations[station_nr - 1];
+    server.send(200, "text/html", "<h1>Streaming</h1><h2><a href=\"http://esp32.local/stations\">Back</a></h2>\n<p>Name: " + station.getName() + "</p>\n<p>Url: " +  station.getUrl() + "</p>");
   }
 }
 
@@ -333,8 +357,6 @@ void streamingTaskFunction(void* parameter) {
       "Host: " + station->getServer() + "\r\n" +
       "Connection: keep-alive\r\n\r\n"
     );
-
-    server.send(200, "text/plain", "Streaming ...");
 
     bool do_close_stream = false;
     
@@ -374,15 +396,18 @@ void printByteArray(uint8_t* array, size_t length) {
   }
   Serial.println();
 }
-
+OneChannelSoundData data_array[100];
+int current_index = 0;
 void mp3DecoderCallback(MP3FrameInfo &info, int16_t *pcm_buffer, size_t len, void* ref) {
   Serial.println("Callback");
-  SoundData *data = new OneChannelSoundData(pcm_buffer, len);
-  if (data != nullptr) {
-    a2dp_source.write_data(data);    
-    vTaskDelay(pdMS_TO_TICKS(300));
-    delete data;
+  
+  while(a2dp_source.has_sound_data()){
+    vTaskDelay(1);
   }
+  data_array[current_index] = OneChannelSoundData(pcm_buffer, len);
+  a2dp_source.write_data(data_array+current_index);    
+  current_index++;
+  current_index = current_index % 100;
 }
 
 // int32_t get_data_channels(Frame *frame, int32_t channel_len) {
