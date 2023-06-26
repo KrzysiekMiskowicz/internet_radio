@@ -14,10 +14,10 @@
 using namespace libhelix;
 
 // WiFi params
-const char* SSID = "***";
-const char* PASSWORD = "***";
+const char* SSID = "Krzysiu-WiFi";
+const char* PASSWORD = "ugodowy518";
 
-const char* BLUETOOTH_RECEIVER = "***";
+const char* BLUETOOTH_RECEIVER = "KRZYSIU";
 
 class Station {
   private:
@@ -84,7 +84,6 @@ TaskHandle_t streamingTasks[MAX_TASKS];
 void setup(void) {
   Serial.begin(115200);
 
-// TODO
   mp3.setDataCallback(mp3DecoderCallback);
   
   setupWifi();
@@ -257,16 +256,8 @@ void handleAddStation() {
   String name = server.arg("name");
   String serverName = lstripHttp(server.arg("url"));
   String urlParams = "";
-
-  Serial.println(name);
-  Serial.println(serverName);
   
-  // Extract the parameters from the JSON object
-  // String name = jsonBuffer["name"];
-  // String server_name = jsonBuffer["server"];
-  // String url_params = jsonBuffer["urlurlParams-params"];
-  // Station station(name, server_name, url_params);
-Station station(name, serverName, urlParams);
+  Station station(name, serverName, urlParams);
   updateStations(station);
   
   server.send(200, "text/html", "Station added successfully <a href=\"http://esp32.local/stations\">Back</a>");
@@ -332,7 +323,7 @@ void handleStreamStation() {
       taskName,                        // Task name
       10000,                           // Stack size (bytes)
       station_idx,                     // Task parameter (station object pointer)
-      tskIDLE_PRIORITY,                               // Task priority
+      tskIDLE_PRIORITY,                // Task priority
       &streamingTasks[station_nr - 1], // Task handle
       0                                // Core to run the task on (0 or 1)
     );
@@ -366,11 +357,6 @@ void streamingTaskFunction(void* parameter) {
       while (!do_close_stream && client.available()) {
         unsigned int bytesRead = client.readBytes(buffer, bufferSize);
         if (bytesRead > 0) {
-
-          // Serial.println("Array: " + String(bytesRead));
-          // printByteArray(buffer, bytesRead);
-
-          Serial.println("Fetch data");
           mp3.write((int16_t*)buffer, bytesRead);
         }
         xSemaphoreTake(streamingSemaphore, portMAX_DELAY);
@@ -388,19 +374,11 @@ void streamingTaskFunction(void* parameter) {
   vTaskDelete(NULL);
 }
 
-void printByteArray(uint8_t* array, size_t length) {
-  for (size_t i = 0; i < length; i++) {
-    Serial.print("0x");
-    Serial.print(array[i], HEX);
-    Serial.print(", "); 
-  }
-  Serial.println();
-}
+
 OneChannelSoundData data_array[100];
 int current_index = 0;
+
 void mp3DecoderCallback(MP3FrameInfo &info, int16_t *pcm_buffer, size_t len, void* ref) {
-  Serial.println("Callback");
-  
   while(a2dp_source.has_sound_data()){
     vTaskDelay(1);
   }
@@ -409,20 +387,3 @@ void mp3DecoderCallback(MP3FrameInfo &info, int16_t *pcm_buffer, size_t len, voi
   current_index++;
   current_index = current_index % 100;
 }
-
-// int32_t get_data_channels(Frame *frame, int32_t channel_len) {
-//     static double m_time = 0.0;
-//     double m_amplitude = 10000.0;  // -32,768 to 32,767
-//     double m_deltaTime = 1.0 / 44100.0;
-//     double m_phase = 0.0;
-//     double double_Pi = PI * 2.0;
-//     // fill the channel data
-//     for (int sample = 0; sample < channel_len; ++sample) {
-//         double angle = double_Pi * c3_frequency * m_time + m_phase;
-//         frame[sample].channel1 = m_amplitude * sin(angle);
-//         frame[sample].channel2 = frame[sample].channel1;
-//         m_time += m_deltaTime;
-//     }
-
-//     return channel_len;
-// }
